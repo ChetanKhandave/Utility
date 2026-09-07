@@ -1,6 +1,7 @@
 package com.chetankhandave.utility.jdbc;
 
 import java.util.Arrays;
+import java.util.regex.Pattern;
 
 /**
  * Factory methods for commonly used {@link ValidationRule} instances.
@@ -40,6 +41,67 @@ public final class ValidationRules {
         return new ValidationRule<String>(
                 value -> value.length() <= max,
                 "length must not exceed " + max);
+    }
+
+    /**
+     * Requires the complete String value to match the supplied regular
+     * expression.
+     *
+     * <p>The regular expression is compiled once when the rule is created and
+     * {@link java.util.regex.Matcher#matches()} semantics are used, meaning the
+     * entire value must match the pattern. This makes the rule suitable for
+     * strict allow-list formats such as reference numbers, account identifiers,
+     * country codes, and other structurally constrained SQL parameters.</p>
+     *
+     * @param regex regular expression describing the complete allowed format
+     * @return rule that accepts only Strings matching the supplied pattern
+     * @throws IllegalArgumentException when {@code regex} is null or blank
+     * @throws java.util.regex.PatternSyntaxException when the expression is invalid
+     */
+    public static ValidationRule<String> matchesPattern(final String regex) {
+        if (regex == null || regex.trim().isEmpty()) {
+            throw new IllegalArgumentException("Regular expression must not be null or blank");
+        }
+
+        final Pattern pattern = Pattern.compile(regex);
+
+        return new ValidationRule<String>(
+                value -> pattern.matcher(value).matches(),
+                "must match pattern " + regex);
+    }
+
+    /**
+     * Requires a non-empty String to contain only ASCII letters and digits.
+     *
+     * <p>Allowed characters are {@code A-Z}, {@code a-z}, and {@code 0-9}.
+     * Spaces, punctuation, quotes, angle brackets, tabs, newlines, and other
+     * characters are rejected. Use this rule only for fields whose business
+     * format genuinely permits this restricted character set.</p>
+     *
+     * @return rule allowing only one or more ASCII alphanumeric characters
+     */
+    public static ValidationRule<String> alphanumeric() {
+        return new ValidationRule<String>(
+                value -> value.matches("[A-Za-z0-9]+"),
+                "must contain only alphanumeric characters");
+    }
+
+    /**
+     * Requires a non-empty String to contain only ASCII letters, digits, and
+     * the ordinary space character.
+     *
+     * <p>Allowed characters are {@code A-Z}, {@code a-z}, {@code 0-9}, and
+     * {@code ' '}. Tabs, line breaks, punctuation, quotes, and angle brackets
+     * are rejected. Leading, trailing, and repeated ordinary spaces are allowed;
+     * combine this rule with additional field-specific validation when those
+     * forms should also be restricted.</p>
+     *
+     * @return rule allowing ASCII alphanumeric characters and ordinary spaces
+     */
+    public static ValidationRule<String> alphanumericWithSpace() {
+        return new ValidationRule<String>(
+                value -> value.matches("[A-Za-z0-9 ]+"),
+                "must contain only alphanumeric characters and spaces");
     }
 
     /**

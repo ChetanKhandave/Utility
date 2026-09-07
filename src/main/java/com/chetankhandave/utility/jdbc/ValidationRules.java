@@ -1,5 +1,7 @@
 package com.chetankhandave.utility.jdbc;
 
+import java.util.Arrays;
+
 /**
  * Factory methods for commonly used {@link ValidationRule} instances.
  *
@@ -68,5 +70,86 @@ public final class ValidationRules {
         return new ValidationRule<Integer>(
                 value -> value >= minimum && value <= maximum,
                 "must be between " + minimum + " and " + maximum);
+    }
+
+    /**
+     * Requires a value to exactly match one member of a configured whitelist.
+     *
+     * <p>This rule is useful for SQL parameters representing a finite set of
+     * values such as status, request type, operation type, category, or mode.
+     * Matching uses the normal {@link Object#equals(Object)} contract, so String
+     * comparisons performed by this generic rule are case-sensitive.</p>
+     *
+     * <p>Nullability should be expressed with {@link SqlParameter#nullable}
+     * rather than by adding {@code null} to the allowed-values list.</p>
+     *
+     * @param allowedValues values that are permitted for the parameter
+     * @param <T> Java type being validated
+     * @return validation rule that accepts only one of the configured values
+     * @throws IllegalArgumentException when the allowed-values array is null,
+     *                                  empty, or contains a null element
+     */
+    @SafeVarargs
+    public static <T> ValidationRule<T> allowedValues(final T... allowedValues) {
+        validateAllowedValues(allowedValues);
+
+        // Use a defensive copy so later changes to the caller's array do not
+        // silently change the behavior of an already-created validation rule.
+        final T[] values = Arrays.copyOf(allowedValues, allowedValues.length);
+
+        return new ValidationRule<T>(
+                value -> Arrays.asList(values).contains(value),
+                "must be one of " + Arrays.toString(values));
+    }
+
+    /**
+     * Requires a String to match one member of a configured whitelist while
+     * ignoring character case.
+     *
+     * <p>For example, when {@code ACTIVE} is allowed, values such as
+     * {@code active} and {@code Active} are also accepted. Use
+     * {@link #allowedValues(Object[])} when the database/application contract is
+     * intentionally case-sensitive.</p>
+     *
+     * @param allowedValues String values that are permitted for the parameter
+     * @return case-insensitive allowed-values validation rule
+     * @throws IllegalArgumentException when the allowed-values array is null,
+     *                                  empty, or contains a null element
+     */
+    public static ValidationRule<String> allowedValuesIgnoreCase(
+            final String... allowedValues) {
+        validateAllowedValues(allowedValues);
+
+        final String[] values = Arrays.copyOf(allowedValues, allowedValues.length);
+
+        return new ValidationRule<String>(
+                value -> {
+                    for (String allowedValue : values) {
+                        if (allowedValue.equalsIgnoreCase(value)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                "must be one of " + Arrays.toString(values) + " (case-insensitive)");
+    }
+
+    /**
+     * Validates configuration shared by the allowed-values factory methods.
+     * Null parameter values themselves are handled by {@link SqlParameter};
+     * this method only validates the whitelist definition.
+     */
+    private static <T> void validateAllowedValues(final T[] allowedValues) {
+        if (allowedValues == null || allowedValues.length == 0) {
+            throw new IllegalArgumentException(
+                    "Allowed values must not be null or empty");
+        }
+
+        for (T allowedValue : allowedValues) {
+            if (allowedValue == null) {
+                throw new IllegalArgumentException(
+                        "Allowed values must not contain null");
+            }
+        }
     }
 }

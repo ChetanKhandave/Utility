@@ -18,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Integration tests for allowed-values validation using a real H2 database.
+ * Integration tests for reusable String/whitelist validation rules using a real
+ * H2 in-memory database.
  *
  * <p>These tests intentionally avoid mocking {@link Connection},
  * {@link PreparedStatement}, and {@link ResultSet}. They verify the complete
@@ -29,10 +30,7 @@ class ValidationRulesIntegrationTest {
 
     private Connection connection;
 
-    /**
-     * Creates a fresh in-memory table before every test so each scenario has an
-     * isolated and predictable database state.
-     */
+    /** Creates a fresh table before every test for isolated database state. */
     @BeforeEach
     void setUp() throws SQLException {
         connection = DriverManager.getConnection(
@@ -42,14 +40,11 @@ class ValidationRulesIntegrationTest {
             statement.execute("DROP TABLE IF EXISTS ACCOUNT_STATUS");
             statement.execute("CREATE TABLE ACCOUNT_STATUS ("
                     + "ID INT PRIMARY KEY, "
-                    + "STATUS VARCHAR(20) NOT NULL)");
+                    + "STATUS VARCHAR(100) NOT NULL)");
         }
     }
 
-    /**
-     * Closes the real JDBC connection after every integration-test scenario to
-     * prevent resource leakage.
-     */
+    /** Closes the real JDBC connection after each integration-test scenario. */
     @AfterEach
     void tearDown() throws SQLException {
         if (connection != null) {
@@ -57,119 +52,134 @@ class ValidationRulesIntegrationTest {
         }
     }
 
-    /**
-     * Verifies that an exact member of a case-sensitive allowed-values whitelist
-     * is successfully bound to a real PreparedStatement and persisted by H2.
-     */
+    /** Verifies a configured case-sensitive whitelist value is persisted. */
     @Test
     void allowedValuesShouldPersistConfiguredValueUsingRealJdbc() throws SQLException {
-        insertStatus(1, "ACTIVE", ValidationRules.allowedValues(
+        insertValue(1, "ACTIVE", ValidationRules.allowedValues(
                 "ACTIVE", "INACTIVE", "BLOCKED"));
-
-        assertEquals("ACTIVE", readStatus(1));
+        assertEquals("ACTIVE", readValue(1));
     }
 
-    /**
-     * Verifies that a value outside the whitelist is rejected before SQL
-     * execution. Because binding fails first, no row must be inserted.
-     */
+    /** Verifies an unknown whitelist value is rejected before SQL execution. */
     @Test
     void allowedValuesShouldPreventInsertForUnknownValue() throws SQLException {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> insertStatus(
-                        1,
-                        "PENDING",
-                        ValidationRules.allowedValues(
-                                "ACTIVE", "INACTIVE", "BLOCKED")));
-
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "PENDING",
+                        ValidationRules.allowedValues("ACTIVE", "INACTIVE", "BLOCKED")));
         assertFalse(recordExists(1));
     }
 
-    /**
-     * Confirms that the generic allowed-values rule remains case-sensitive in a
-     * real JDBC flow. Lowercase input must be rejected when only uppercase text
-     * is configured.
-     */
+    /** Confirms case-sensitive whitelist behavior through a real JDBC flow. */
     @Test
     void allowedValuesShouldRejectDifferentCaseUsingRealJdbc() throws SQLException {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> insertStatus(
-                        1,
-                        "active",
-                        ValidationRules.allowedValues("ACTIVE")));
-
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "active", ValidationRules.allowedValues("ACTIVE")));
         assertFalse(recordExists(1));
     }
 
-    /**
-     * Verifies the case-insensitive rule through the complete JDBC path. The
-     * lowercase input is valid against the uppercase whitelist and is persisted
-     * exactly as supplied by the caller.
-     */
+    /** Verifies case-insensitive whitelist acceptance and persistence. */
     @Test
     void allowedValuesIgnoreCaseShouldPersistDifferentCaseUsingRealJdbc()
             throws SQLException {
-        insertStatus(
-                1,
-                "active",
-                ValidationRules.allowedValuesIgnoreCase(
-                        "ACTIVE", "INACTIVE", "BLOCKED"));
-
-        assertEquals("active", readStatus(1));
+        insertValue(1, "active",
+                ValidationRules.allowedValuesIgnoreCase("ACTIVE", "INACTIVE", "BLOCKED"));
+        assertEquals("active", readValue(1));
     }
 
-    /**
-     * Verifies that case-insensitive comparison does not weaken the whitelist:
-     * an unrelated value must still fail validation and must not reach H2.
-     */
+    /** Verifies unknown values remain invalid with case-insensitive matching. */
     @Test
-    void allowedValuesIgnoreCaseShouldPreventUnknownValueInsert()
-            throws SQLException {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> insertStatus(
-                        1,
-                        "PENDING",
+    void allowedValuesIgnoreCaseShouldPreventUnknownValueInsert() throws SQLException {
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "PENDING",
                         ValidationRules.allowedValuesIgnoreCase(
                                 "ACTIVE", "INACTIVE", "BLOCKED")));
-
         assertFalse(recordExists(1));
     }
 
     /**
-     * Executes the INSERT used by each scenario. The status parameter is bound
-     * through the production validation/binder utility rather than directly via
-     * PreparedStatement#setString.
+     * Verifies matchesPattern through the complete JDBC path using a reference
+     * number format that must match the entire value.
      */
-    private void insertStatus(int id,
-                              String status,
-                              ValidationRule<String> statusRule) throws SQLException {
+    @Test
+    void matchesPatternShouldPersistValidFormattedValueUsingRealJdbc() throws SQLException {
+        insertValue(1, "REQ-1001", ValidationRules.matchesPattern("REQ-[0-9]{4}"));
+        assertEquals("REQ-1001", readValue(1));
+    }
+
+    /**
+     * Verifies a value outside the configured regex format fails validation and
+     * therefore produces no database record.
+     */
+    @Test
+    void matchesPatternShouldPreventInsertForInvalidFormat() throws SQLException {
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "ABC-1001",
+                        ValidationRules.matchesPattern("REQ-[0-9]{4}")));
+        assertFalse(recordExists(1));
+    }
+
+    /** Verifies an ASCII letters/digits value is persisted by the alphanumeric rule. */
+    @Test
+    void alphanumericShouldPersistValidValueUsingRealJdbc() throws SQLException {
+        insertValue(1, "Customer123", ValidationRules.alphanumeric());
+        assertEquals("Customer123", readValue(1));
+    }
+
+    /**
+     * Verifies punctuation/HTML-related characters are rejected by the strict
+     * alphanumeric allow-list before the INSERT can execute.
+     */
+    @Test
+    void alphanumericShouldPreventInsertForDisallowedCharacters() throws SQLException {
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "script>alert1", ValidationRules.alphanumeric()));
+        assertFalse(recordExists(1));
+    }
+
+    /** Verifies ordinary spaces are accepted by alphanumericWithSpace. */
+    @Test
+    void alphanumericWithSpaceShouldPersistValidValueUsingRealJdbc() throws SQLException {
+        insertValue(1, "Customer 123 India", ValidationRules.alphanumericWithSpace());
+        assertEquals("Customer 123 India", readValue(1));
+    }
+
+    /**
+     * Verifies punctuation and HTML-like markup are rejected by the
+     * alphanumeric-with-space rule and no row is inserted.
+     */
+    @Test
+    void alphanumericWithSpaceShouldPreventInsertForDisallowedCharacters()
+            throws SQLException {
+        assertThrows(IllegalArgumentException.class,
+                () -> insertValue(1, "<script>alert1</script>",
+                        ValidationRules.alphanumericWithSpace()));
+        assertFalse(recordExists(1));
+    }
+
+    /**
+     * Executes an INSERT through the production SqlParameter and binder utility
+     * so validation occurs before the PreparedStatement executes.
+     */
+    private void insertValue(int id,
+                             String value,
+                             ValidationRule<String> rule) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO ACCOUNT_STATUS (ID, STATUS) VALUES (?, ?)")) {
-
             PreparedStatementBinder.bind(
                     statement,
                     SqlParameter.required("id", id, Types.INTEGER,
                             ValidationRules.positiveInteger()),
-                    SqlParameter.required("status", status, Types.VARCHAR,
-                            ValidationRules.notBlank(),
-                            statusRule));
-
+                    SqlParameter.required("status", value, Types.VARCHAR,
+                            ValidationRules.notBlank(), rule));
             statement.executeUpdate();
         }
     }
 
-    /**
-     * Reads the stored status back from H2 to prove that successful validation
-     * resulted in an actual database write.
-     */
-    private String readStatus(int id) throws SQLException {
+    /** Reads the stored value back from H2 after successful validation/execution. */
+    private String readValue(int id) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT STATUS FROM ACCOUNT_STATUS WHERE ID = ?")) {
             statement.setInt(1, id);
-
             try (ResultSet resultSet = statement.executeQuery()) {
                 assertTrue(resultSet.next());
                 return resultSet.getString("STATUS");
@@ -177,15 +187,11 @@ class ValidationRulesIntegrationTest {
         }
     }
 
-    /**
-     * Checks database state after a validation failure. A false result proves
-     * that the rejected value never reached SQL execution.
-     */
+    /** Checks whether validation failure prevented a row from being inserted. */
     private boolean recordExists(int id) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT COUNT(*) FROM ACCOUNT_STATUS WHERE ID = ?")) {
             statement.setInt(1, id);
-
             try (ResultSet resultSet = statement.executeQuery()) {
                 assertTrue(resultSet.next());
                 return resultSet.getInt(1) > 0;

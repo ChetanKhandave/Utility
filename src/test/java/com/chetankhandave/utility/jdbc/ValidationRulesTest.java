@@ -13,8 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit tests for the reusable rules exposed by {@link ValidationRules}.
  *
  * <p>The suite focuses on normal values, exact boundaries, invalid rule
- * configuration, whitelist-style validation, and strict String-format rules so
- * callers can rely on predictable behavior before JDBC binding occurs.</p>
+ * configuration, whitelist-style validation, strict String-format rules, and
+ * direct null-safety. Every value-validation rule must return false for null
+ * rather than throwing NullPointerException.</p>
  */
 class ValidationRulesTest {
 
@@ -34,6 +35,12 @@ class ValidationRulesTest {
     @Test
     void notBlankShouldRejectWhitespaceOnlyValue() {
         assertFalse(ValidationRules.notBlank().isValid("   "));
+    }
+
+    /** Verifies direct null validation is safe and returns false. */
+    @Test
+    void notBlankShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.notBlank().isValid(null));
     }
 
     /** Verifies that maxLength accepts values shorter than the configured limit. */
@@ -60,6 +67,12 @@ class ValidationRulesTest {
         assertTrue(ValidationRules.maxLength(0).isValid(""));
     }
 
+    /** Verifies maxLength rejects null without dereferencing it. */
+    @Test
+    void maxLengthShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.maxLength(5).isValid(null));
+    }
+
     /** Verifies that a negative maximum cannot be used to construct a rule. */
     @Test
     void maxLengthShouldRejectNegativeMaximum() {
@@ -67,27 +80,25 @@ class ValidationRulesTest {
                 () -> ValidationRules.maxLength(-1));
     }
 
-    /**
-     * Verifies that matchesPattern accepts a value whose complete content
-     * follows the configured reference-number format.
-     */
+    /** Verifies matchesPattern accepts a value matching the complete format. */
     @Test
     void matchesPatternShouldAcceptMatchingValue() {
         ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
-
         assertTrue(rule.isValid("REQ-1001"));
     }
 
-    /**
-     * Verifies that matchesPattern rejects a value when any part of the String
-     * falls outside the configured complete-value format.
-     */
+    /** Verifies matchesPattern rejects values outside the complete format. */
     @Test
     void matchesPatternShouldRejectNonMatchingValue() {
         ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
-
         assertFalse(rule.isValid("ABC-1001"));
         assertFalse(rule.isValid("REQ-1001-EXTRA"));
+    }
+
+    /** Verifies matchesPattern rejects a null input without throwing. */
+    @Test
+    void matchesPatternShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.matchesPattern("REQ-[0-9]{4}").isValid(null));
     }
 
     /** Verifies that a null regular-expression definition is rejected immediately. */
@@ -115,7 +126,6 @@ class ValidationRulesTest {
     @Test
     void matchesPatternShouldDescribeRequiredPatternInMessage() {
         ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
-
         assertEquals("must match pattern REQ-[0-9]{4}", rule.getMessage());
     }
 
@@ -137,23 +147,16 @@ class ValidationRulesTest {
         assertTrue(ValidationRules.alphanumeric().isValid("12345"));
     }
 
-    /**
-     * Verifies that spaces and punctuation are rejected by the strict
-     * alphanumeric allow-list.
-     */
+    /** Verifies spaces and punctuation are rejected by the strict allow-list. */
     @Test
     void alphanumericShouldRejectSpaceAndPunctuation() {
         ValidationRule<String> rule = ValidationRules.alphanumeric();
-
         assertFalse(rule.isValid("Customer 123"));
         assertFalse(rule.isValid("Customer-123"));
         assertFalse(rule.isValid("Customer_123"));
     }
 
-    /**
-     * Covers an XSS-like payload to prove characters such as angle brackets and
-     * slash are outside the strict alphanumeric allow-list.
-     */
+    /** Covers HTML-like characters outside the strict alphanumeric allow-list. */
     @Test
     void alphanumericShouldRejectHtmlLikeCharacters() {
         assertFalse(ValidationRules.alphanumeric().isValid("script>alert1"));
@@ -165,20 +168,22 @@ class ValidationRulesTest {
         assertFalse(ValidationRules.alphanumeric().isValid(""));
     }
 
-    /** Verifies that alphanumericWithSpace accepts normal words separated by spaces. */
+    /** Verifies alphanumeric rejects null without throwing. */
+    @Test
+    void alphanumericShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.alphanumeric().isValid(null));
+    }
+
+    /** Verifies alphanumericWithSpace accepts normal words separated by spaces. */
     @Test
     void alphanumericWithSpaceShouldAcceptLettersDigitsAndSpaces() {
         assertTrue(ValidationRules.alphanumericWithSpace().isValid("Customer 123 India"));
     }
 
-    /**
-     * Documents the intentional behavior that ordinary leading, trailing, and
-     * repeated spaces are permitted by this character-set rule.
-     */
+    /** Documents that ordinary leading, trailing, and repeated spaces are permitted. */
     @Test
     void alphanumericWithSpaceShouldAllowOrdinaryRepeatedSpaces() {
         ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
-
         assertTrue(rule.isValid(" Customer  123 "));
     }
 
@@ -186,7 +191,6 @@ class ValidationRulesTest {
     @Test
     void alphanumericWithSpaceShouldRejectTabsAndLineBreaks() {
         ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
-
         assertFalse(rule.isValid("Customer\t123"));
         assertFalse(rule.isValid("Customer\n123"));
     }
@@ -195,7 +199,6 @@ class ValidationRulesTest {
     @Test
     void alphanumericWithSpaceShouldRejectPunctuationAndHtmlLikeCharacters() {
         ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
-
         assertFalse(rule.isValid("Customer & Company"));
         assertFalse(rule.isValid("<script>alert1</script>"));
     }
@@ -204,6 +207,12 @@ class ValidationRulesTest {
     @Test
     void alphanumericWithSpaceShouldRejectEmptyString() {
         assertFalse(ValidationRules.alphanumericWithSpace().isValid(""));
+    }
+
+    /** Verifies alphanumericWithSpace rejects null without throwing. */
+    @Test
+    void alphanumericWithSpaceShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.alphanumericWithSpace().isValid(null));
     }
 
     /** Verifies that positiveInteger accepts the smallest positive value. */
@@ -222,6 +231,12 @@ class ValidationRulesTest {
     @Test
     void positiveIntegerShouldRejectNegativeValue() {
         assertFalse(ValidationRules.positiveInteger().isValid(-1));
+    }
+
+    /** Verifies positiveInteger rejects null without unboxing it. */
+    @Test
+    void positiveIntegerShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.positiveInteger().isValid(null));
     }
 
     /** Covers the inclusive lower boundary of an integer range. */
@@ -248,6 +263,12 @@ class ValidationRulesTest {
         assertFalse(ValidationRules.integerRange(18, 100).isValid(101));
     }
 
+    /** Verifies integerRange rejects null without unboxing it. */
+    @Test
+    void integerRangeShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.integerRange(18, 100).isValid(null));
+    }
+
     /** Verifies that an inverted range definition is rejected at construction time. */
     @Test
     void integerRangeShouldRejectInvalidBounds() {
@@ -269,6 +290,12 @@ class ValidationRulesTest {
         ValidationRule<String> rule = ValidationRules.allowedValues(
                 "ACTIVE", "INACTIVE", "BLOCKED");
         assertFalse(rule.isValid("PENDING"));
+    }
+
+    /** Verifies allowedValues rejects null directly and safely. */
+    @Test
+    void allowedValuesShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.allowedValues("ACTIVE", "INACTIVE").isValid(null));
     }
 
     /** Confirms that the generic allowed-values rule is case-sensitive for Strings. */
@@ -340,6 +367,12 @@ class ValidationRulesTest {
         ValidationRule<String> rule = ValidationRules.allowedValuesIgnoreCase(
                 "ACTIVE", "INACTIVE", "BLOCKED");
         assertFalse(rule.isValid("PENDING"));
+    }
+
+    /** Verifies allowedValuesIgnoreCase rejects null directly and safely. */
+    @Test
+    void allowedValuesIgnoreCaseShouldRejectNullWithoutThrowing() {
+        assertFalse(ValidationRules.allowedValuesIgnoreCase("ACTIVE", "INACTIVE").isValid(null));
     }
 
     /** Verifies configuration validation for an empty case-insensitive whitelist. */

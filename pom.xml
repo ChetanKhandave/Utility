@@ -14,9 +14,11 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.10.2</junit.version>
         <mockito.version>4.11.0</mockito.version>
+        <h2.version>2.2.224</h2.version>
     </properties>
 
     <dependencies>
+        <!-- Unit testing framework. -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -24,10 +26,23 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Used only by focused unit tests where JDBC collaborators are mocked. -->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
             <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Real in-memory JDBC database used by integration tests. This allows
+            Connection, PreparedStatement, ResultSet and SQL execution to remain
+            unmocked while keeping the test suite self-contained.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>${h2.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

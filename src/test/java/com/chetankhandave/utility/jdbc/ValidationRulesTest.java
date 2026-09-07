@@ -2,6 +2,8 @@ package com.chetankhandave.utility.jdbc;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.regex.PatternSyntaxException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit tests for the reusable rules exposed by {@link ValidationRules}.
  *
  * <p>The suite focuses on normal values, exact boundaries, invalid rule
- * configuration, and whitelist-style validation so callers can rely on
- * predictable behavior before JDBC binding occurs.</p>
+ * configuration, whitelist-style validation, and strict String-format rules so
+ * callers can rely on predictable behavior before JDBC binding occurs.</p>
  */
 class ValidationRulesTest {
 
@@ -65,6 +67,145 @@ class ValidationRulesTest {
                 () -> ValidationRules.maxLength(-1));
     }
 
+    /**
+     * Verifies that matchesPattern accepts a value whose complete content
+     * follows the configured reference-number format.
+     */
+    @Test
+    void matchesPatternShouldAcceptMatchingValue() {
+        ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
+
+        assertTrue(rule.isValid("REQ-1001"));
+    }
+
+    /**
+     * Verifies that matchesPattern rejects a value when any part of the String
+     * falls outside the configured complete-value format.
+     */
+    @Test
+    void matchesPatternShouldRejectNonMatchingValue() {
+        ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
+
+        assertFalse(rule.isValid("ABC-1001"));
+        assertFalse(rule.isValid("REQ-1001-EXTRA"));
+    }
+
+    /** Verifies that a null regular-expression definition is rejected immediately. */
+    @Test
+    void matchesPatternShouldRejectNullPattern() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ValidationRules.matchesPattern(null));
+    }
+
+    /** Verifies that a blank regular-expression definition is rejected immediately. */
+    @Test
+    void matchesPatternShouldRejectBlankPattern() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ValidationRules.matchesPattern("   "));
+    }
+
+    /** Verifies that an invalid regular expression surfaces PatternSyntaxException. */
+    @Test
+    void matchesPatternShouldRejectInvalidRegularExpression() {
+        assertThrows(PatternSyntaxException.class,
+                () -> ValidationRules.matchesPattern("[A-Z"));
+    }
+
+    /** Verifies that the rule message identifies the required regular expression. */
+    @Test
+    void matchesPatternShouldDescribeRequiredPatternInMessage() {
+        ValidationRule<String> rule = ValidationRules.matchesPattern("REQ-[0-9]{4}");
+
+        assertEquals("must match pattern REQ-[0-9]{4}", rule.getMessage());
+    }
+
+    /** Verifies that alphanumeric accepts mixed ASCII letters and digits. */
+    @Test
+    void alphanumericShouldAcceptLettersAndDigits() {
+        assertTrue(ValidationRules.alphanumeric().isValid("Customer123"));
+    }
+
+    /** Verifies that alphanumeric also accepts a value containing only letters. */
+    @Test
+    void alphanumericShouldAcceptLettersOnly() {
+        assertTrue(ValidationRules.alphanumeric().isValid("Customer"));
+    }
+
+    /** Verifies that alphanumeric also accepts a value containing only digits. */
+    @Test
+    void alphanumericShouldAcceptDigitsOnly() {
+        assertTrue(ValidationRules.alphanumeric().isValid("12345"));
+    }
+
+    /**
+     * Verifies that spaces and punctuation are rejected by the strict
+     * alphanumeric allow-list.
+     */
+    @Test
+    void alphanumericShouldRejectSpaceAndPunctuation() {
+        ValidationRule<String> rule = ValidationRules.alphanumeric();
+
+        assertFalse(rule.isValid("Customer 123"));
+        assertFalse(rule.isValid("Customer-123"));
+        assertFalse(rule.isValid("Customer_123"));
+    }
+
+    /**
+     * Covers an XSS-like payload to prove characters such as angle brackets and
+     * slash are outside the strict alphanumeric allow-list.
+     */
+    @Test
+    void alphanumericShouldRejectHtmlLikeCharacters() {
+        assertFalse(ValidationRules.alphanumeric().isValid("script>alert1"));
+    }
+
+    /** Verifies that alphanumeric requires at least one character. */
+    @Test
+    void alphanumericShouldRejectEmptyString() {
+        assertFalse(ValidationRules.alphanumeric().isValid(""));
+    }
+
+    /** Verifies that alphanumericWithSpace accepts normal words separated by spaces. */
+    @Test
+    void alphanumericWithSpaceShouldAcceptLettersDigitsAndSpaces() {
+        assertTrue(ValidationRules.alphanumericWithSpace().isValid("Customer 123 India"));
+    }
+
+    /**
+     * Documents the intentional behavior that ordinary leading, trailing, and
+     * repeated spaces are permitted by this character-set rule.
+     */
+    @Test
+    void alphanumericWithSpaceShouldAllowOrdinaryRepeatedSpaces() {
+        ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
+
+        assertTrue(rule.isValid(" Customer  123 "));
+    }
+
+    /** Verifies that tabs and line breaks are not treated as allowed spaces. */
+    @Test
+    void alphanumericWithSpaceShouldRejectTabsAndLineBreaks() {
+        ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
+
+        assertFalse(rule.isValid("Customer\t123"));
+        assertFalse(rule.isValid("Customer\n123"));
+    }
+
+    /** Verifies punctuation and HTML-related characters are rejected. */
+    @Test
+    void alphanumericWithSpaceShouldRejectPunctuationAndHtmlLikeCharacters() {
+        ValidationRule<String> rule = ValidationRules.alphanumericWithSpace();
+
+        assertFalse(rule.isValid("Customer & Company"));
+        assertFalse(rule.isValid("<script>alert1</script>"));
+    }
+
+    /** Verifies that alphanumericWithSpace requires at least one character. */
+    @Test
+    void alphanumericWithSpaceShouldRejectEmptyString() {
+        assertFalse(ValidationRules.alphanumericWithSpace().isValid(""));
+    }
+
     /** Verifies that positiveInteger accepts the smallest positive value. */
     @Test
     void positiveIntegerShouldAcceptPositiveValue() {
@@ -114,158 +255,111 @@ class ValidationRulesTest {
                 () -> ValidationRules.integerRange(100, 18));
     }
 
-    /**
-     * Verifies the normal whitelist scenario: a value exactly matching one of
-     * the configured allowed String values must be accepted.
-     */
+    /** Verifies the normal whitelist scenario for a configured String value. */
     @Test
     void allowedValuesShouldAcceptConfiguredStringValue() {
         ValidationRule<String> rule = ValidationRules.allowedValues(
                 "ACTIVE", "INACTIVE", "BLOCKED");
-
         assertTrue(rule.isValid("ACTIVE"));
     }
 
-    /**
-     * Verifies that a value outside the configured whitelist is rejected.
-     * This is the primary protection expected for enum-like SQL parameters.
-     */
+    /** Verifies that a value outside the configured whitelist is rejected. */
     @Test
     void allowedValuesShouldRejectUnconfiguredStringValue() {
         ValidationRule<String> rule = ValidationRules.allowedValues(
                 "ACTIVE", "INACTIVE", "BLOCKED");
-
         assertFalse(rule.isValid("PENDING"));
     }
 
-    /**
-     * Confirms that the generic allowed-values rule is intentionally
-     * case-sensitive when used with Strings.
-     */
+    /** Confirms that the generic allowed-values rule is case-sensitive for Strings. */
     @Test
     void allowedValuesShouldBeCaseSensitiveForStrings() {
         ValidationRule<String> rule = ValidationRules.allowedValues("ACTIVE");
-
         assertFalse(rule.isValid("active"));
     }
 
-    /**
-     * Verifies that allowedValues is generic and can validate non-String SQL
-     * parameter types such as integer codes.
-     */
+    /** Verifies that allowedValues can validate non-String SQL parameter types. */
     @Test
     void allowedValuesShouldSupportIntegerValues() {
         ValidationRule<Integer> rule = ValidationRules.allowedValues(10, 20, 30);
-
         assertTrue(rule.isValid(20));
         assertFalse(rule.isValid(40));
     }
 
-    /**
-     * Verifies that the validation error message lists the configured whitelist,
-     * making failures easier to diagnose in logs and test output.
-     */
+    /** Verifies that the validation message lists the configured whitelist. */
     @Test
     void allowedValuesShouldDescribePermittedValuesInMessage() {
-        ValidationRule<String> rule = ValidationRules.allowedValues(
-                "ACTIVE", "INACTIVE");
-
+        ValidationRule<String> rule = ValidationRules.allowedValues("ACTIVE", "INACTIVE");
         assertEquals("must be one of [ACTIVE, INACTIVE]", rule.getMessage());
     }
 
-    /**
-     * Invalid rule configuration must fail immediately when no whitelist is
-     * supplied, rather than creating a rule that can never succeed.
-     */
+    /** Invalid rule configuration must fail immediately when no whitelist is supplied. */
     @Test
     void allowedValuesShouldRejectEmptyConfiguration() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValues(new String[0]));
     }
 
     /** Verifies that a null whitelist array is rejected during rule creation. */
     @Test
     void allowedValuesShouldRejectNullConfiguration() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValues((String[]) null));
     }
 
-    /**
-     * Null should not be mixed into the whitelist. Nullable SQL parameters are
-     * represented explicitly with SqlParameter.nullable instead.
-     */
+    /** Verifies null is not allowed as an allowed-value element. */
     @Test
     void allowedValuesShouldRejectNullElement() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValues("ACTIVE", null));
     }
 
-    /**
-     * Verifies that the rule keeps its own copy of the allowed values so a
-     * caller cannot accidentally change validation behavior by mutating the
-     * original array after rule creation.
-     */
+    /** Verifies that mutating the caller's array does not mutate the rule. */
     @Test
     void allowedValuesShouldUseDefensiveCopy() {
         String[] values = {"ACTIVE", "INACTIVE"};
         ValidationRule<String> rule = ValidationRules.allowedValues(values);
-
         values[0] = "CHANGED";
-
         assertTrue(rule.isValid("ACTIVE"));
         assertFalse(rule.isValid("CHANGED"));
     }
 
-    /**
-     * Verifies that the case-insensitive rule accepts a value even when the
-     * input uses different character casing from the configured whitelist.
-     */
+    /** Verifies case-insensitive acceptance of differently cased allowed values. */
     @Test
     void allowedValuesIgnoreCaseShouldAcceptDifferentCase() {
         ValidationRule<String> rule = ValidationRules.allowedValuesIgnoreCase(
                 "ACTIVE", "INACTIVE", "BLOCKED");
-
         assertTrue(rule.isValid("active"));
         assertTrue(rule.isValid("Active"));
         assertTrue(rule.isValid("ACTIVE"));
     }
 
-    /**
-     * Case-insensitive matching changes only character case behavior; values
-     * outside the whitelist must still be rejected.
-     */
+    /** Verifies that unknown values remain invalid during case-insensitive matching. */
     @Test
     void allowedValuesIgnoreCaseShouldRejectUnknownValue() {
         ValidationRule<String> rule = ValidationRules.allowedValuesIgnoreCase(
                 "ACTIVE", "INACTIVE", "BLOCKED");
-
         assertFalse(rule.isValid("PENDING"));
     }
 
     /** Verifies configuration validation for an empty case-insensitive whitelist. */
     @Test
     void allowedValuesIgnoreCaseShouldRejectEmptyConfiguration() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValuesIgnoreCase(new String[0]));
     }
 
     /** Verifies configuration validation for a null case-insensitive whitelist. */
     @Test
     void allowedValuesIgnoreCaseShouldRejectNullConfiguration() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValuesIgnoreCase((String[]) null));
     }
 
     /** Verifies that null entries are not allowed in a case-insensitive whitelist. */
     @Test
     void allowedValuesIgnoreCaseShouldRejectNullElement() {
-        assertThrows(
-                IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> ValidationRules.allowedValuesIgnoreCase("ACTIVE", null));
     }
 }

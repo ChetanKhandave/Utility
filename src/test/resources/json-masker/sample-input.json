@@ -1,0 +1,23 @@
+{
+  "name": "sampleuser",
+  "password": "dummy-value",
+  "mobile": "9876543210",
+  "accountNumber": "123456789012",
+  "email": "sample@example.com",
+  "city": "Pune",
+  "customer": {
+    "firstName": "demouser",
+    "otp": "000000",
+    "address": {
+      "city": "Mumbai",
+      "pin": "0000"
+    }
+  },
+  "users": [
+    {"name": "alpha", "phoneNumber": "9988776655"},
+    {"name": "bravo", "phoneNumber": "8877665544"}
+  ],
+  "active": true,
+  "age": 35,
+  "nullableValue": null
+}

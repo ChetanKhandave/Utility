@@ -1,0 +1,23 @@
+{
+  "name": "s*m*l*u*e*",
+  "password": "****",
+  "mobile": "******3210",
+  "accountNumber": "********9012",
+  "email": "sam***************",
+  "city": "Pune",
+  "customer": {
+    "firstName": "d*m*u*e*",
+    "otp": "****",
+    "address": {
+      "city": "Mumbai",
+      "pin": "****"
+    }
+  },
+  "users": [
+    {"name": "a*p*a", "phoneNumber": "******6655"},
+    {"name": "b*a*o", "phoneNumber": "******5544"}
+  ],
+  "active": true,
+  "age": 35,
+  "nullableValue": null
+}

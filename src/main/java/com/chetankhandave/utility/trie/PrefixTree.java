@@ -81,6 +81,27 @@ public final class PrefixTree {
     }
 
     /**
+     * Replaces a stored key with a different key. A successful replacement
+     * leaves the number of stored keys unchanged.
+     *
+     * @param oldValue exact key to replace
+     * @param newValue replacement key
+     * @return true if replaced, or false if the old key is absent or the new
+     *         key already exists (including an identical key)
+     * @throws NullPointerException if either argument is null
+     */
+    public boolean replace(String oldValue, String newValue) {
+        Objects.requireNonNull(oldValue, "oldValue");
+        Objects.requireNonNull(newValue, "newValue");
+
+        if (!contains(oldValue) || !add(newValue)) {
+            return false;
+        }
+        remove(oldValue);
+        return true;
+    }
+
+    /**
      * Checks whether the complete string is stored.
      *
      * @param value string to find

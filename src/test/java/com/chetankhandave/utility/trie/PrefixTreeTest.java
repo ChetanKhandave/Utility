@@ -140,4 +140,46 @@ class PrefixTreeTest {
         assertTrue(tree.add("cart"));
         assertTrue(tree.contains("cart"));
     }
+
+    @Test
+    void replacesKeyAndPrunesUnusedBranch() {
+        tree.add("car");
+        tree.add("dog");
+        assertTrue(tree.replace("car", "cat"));
+        assertFalse(tree.startsWith("car"));
+        assertTrue(tree.contains("cat"));
+        assertTrue(tree.contains("dog"));
+        assertEquals(2, tree.size());
+    }
+
+    @Test
+    void replacesWithLongerAndShorterKeysIncludingEmptyKey() {
+        tree.add("");
+        tree.add("cart");
+        assertTrue(tree.replace("", "car"));
+        assertFalse(tree.contains(""));
+        assertTrue(tree.replace("cart", "carter"));
+        assertFalse(tree.contains("cart"));
+        assertTrue(tree.startsWith("cart"));
+        assertTrue(tree.replace("carter", ""));
+        assertFalse(tree.startsWith("cart"));
+        assertTrue(tree.contains("car"));
+        assertTrue(tree.contains(""));
+        assertEquals(2, tree.size());
+    }
+
+    @Test
+    void unsuccessfulReplacementLeavesKeysIntact() {
+        tree.add("car");
+        tree.add("cart");
+        assertFalse(tree.replace("ca", "cat"));
+        assertFalse(tree.replace("car", "cart"));
+        assertFalse(tree.replace("car", new String("car")));
+        assertThrows(NullPointerException.class, () -> tree.replace(null, "cat"));
+        assertThrows(NullPointerException.class, () -> tree.replace("car", null));
+        assertFalse(tree.startsWith("cat"));
+        assertTrue(tree.contains("car"));
+        assertTrue(tree.contains("cart"));
+        assertEquals(2, tree.size());
+    }
 }

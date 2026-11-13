@@ -95,4 +95,49 @@ class PrefixTreeTest {
         assertFalse(other.contains("emp"));
         assertEquals(0, other.size());
     }
+
+    @Test
+    void removesLeafAndPreservesSiblingAndStoredPrefix() {
+        tree.add("car");
+        tree.add("cart");
+        tree.add("cat");
+        assertTrue(tree.remove("cart"));
+        assertFalse(tree.startsWith("cart"));
+        assertTrue(tree.contains("car"));
+        assertTrue(tree.contains("cat"));
+        assertTrue(tree.remove("car"));
+        assertFalse(tree.startsWith("car"));
+        assertTrue(tree.contains("cat"));
+        assertEquals(1, tree.size());
+    }
+
+    @Test
+    void removesStoredPrefixAndEmptyKeyWithoutRemovingDescendants() {
+        tree.add("");
+        tree.add("car");
+        tree.add("cart");
+        assertTrue(tree.remove(""));
+        assertFalse(tree.contains(""));
+        assertTrue(tree.remove("car"));
+        assertFalse(tree.contains("car"));
+        assertTrue(tree.startsWith("car"));
+        assertTrue(tree.contains("cart"));
+        assertEquals(1, tree.size());
+    }
+
+    @Test
+    void missingKeysLeaveTreeIntactAndRemovingLastKeyPrunesEntireBranch() {
+        tree.add("cart");
+        assertFalse(tree.remove("car"));
+        assertFalse(tree.remove("cars"));
+        assertThrows(NullPointerException.class, () -> tree.remove(null));
+        assertEquals(1, tree.size());
+        assertTrue(tree.remove("cart"));
+        assertFalse(tree.remove("cart"));
+        assertFalse(tree.startsWith("c"));
+        assertFalse(tree.startsWith(""));
+        assertEquals(0, tree.size());
+        assertTrue(tree.add("cart"));
+        assertTrue(tree.contains("cart"));
+    }
 }

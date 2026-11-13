@@ -45,6 +45,42 @@ public final class PrefixTree {
     }
 
     /**
+     * Removes an exact key and prunes branches that no stored key uses.
+     *
+     * @param value string to remove
+     * @return true if the key existed and was removed
+     * @throws NullPointerException if value is null
+     */
+    public boolean remove(String value) {
+        Objects.requireNonNull(value, "value");
+        Node node = root;
+        Node pruneParent = root;
+        int pruneIndex = 0;
+
+        for (int index = 0; index < value.length(); index++) {
+            // A stored prefix or a sibling branch must survive the removal.
+            if (node.terminal || node.children.size() > 1) {
+                pruneParent = node;
+                pruneIndex = index;
+            }
+            node = node.children.get(value.charAt(index));
+            if (node == null) {
+                return false;
+            }
+        }
+        if (!node.terminal) {
+            return false;
+        }
+
+        node.terminal = false;
+        size--;
+        if (node != root && node.children.isEmpty()) {
+            pruneParent.children.remove(value.charAt(pruneIndex));
+        }
+        return true;
+    }
+
+    /**
      * Checks whether the complete string is stored.
      *
      * @param value string to find

@@ -7,6 +7,8 @@ mvn -Pbenchmarks clean package
 java -jar target/utility-1.0-SNAPSHOT-benchmarks.jar ConcurrentTrieBenchmark
 ```
 
+Verify benchmark discovery with `java -jar target/utility-1.0-SNAPSHOT-benchmarks.jar -l` after a clean build. JMH generates `META-INF/BenchmarkList` during compilation. The benchmarks profile checks for that file before packaging.
+
 Run a short smoke test with smaller inputs.
 
 ```sh

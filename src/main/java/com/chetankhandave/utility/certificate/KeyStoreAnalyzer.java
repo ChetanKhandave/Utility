@@ -23,12 +23,7 @@ public final class KeyStoreAnalyzer {
     /** Requires an integrity password; null is rejected to avoid unchecked store loading. */
     public Map<String,List<AnalysisReport>> analyze(Path file, String type, char[] storePassword,
             KeyPasswordProvider passwords) throws IOException, GeneralSecurityException {
-        Objects.requireNonNull(storePassword,"storePassword (integrity verification required)");
-        if(!"JKS".equalsIgnoreCase(type) && !"PKCS12".equalsIgnoreCase(type)) throw new IllegalArgumentException("Use JKS or PKCS12");
-        KeyStore store=KeyStore.getInstance(type);
-        char[] copy=storePassword.clone();
-        try(InputStream input=Files.newInputStream(file)) { store.load(input,copy); }
-        finally { Arrays.fill(copy,'\0'); }
+        KeyStore store=KeyStoreLoader.load(file,type,storePassword);
         List<String> aliases=Collections.list(store.aliases()); Collections.sort(aliases);
         Map<String,List<AnalysisReport>> result=new LinkedHashMap<>();
         for(String alias:aliases) {

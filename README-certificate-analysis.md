@@ -69,3 +69,36 @@ Analyzer configuration is immutable. Each keystore call loads a separate store a
 ## Tests
 
 JUnit Jupiter tests generate temporary RSA fixtures with the installed JDK's `keytool` (no real credentials/certificates are committed). They cover JKS/PKCS12, PEM/DER bundles, extension metadata, validity boundaries, custom policies, immutable output, RSA/EC/DSA matching, mismatches, incorrect/null passwords, password clearing, trusted/secret entry types, trust-anchor success, untrusted path rejection and empty chains. Run with a full JDK, not a JRE. Java sources target 8; the tests also use Java 8 APIs.
+
+## Find a particular certificate in a keystore
+
+```sh
+java -cp target/utility-1.0-SNAPSHOT.jar com.chetankhandave.utility.certificate.CertificateAnalysisCli find JKS application.jks certificate.pem
+```
+
+Use `PKCS12` in place of `JKS` for a PKCS12 store. The CLI accepts exactly one PEM/DER certificate; a bundle is rejected to avoid searching for an unintended certificate. The interactive prompt asks only for the store password.
+
+```java
+import com.chetankhandave.utility.certificate.*;
+import java.nio.file.Paths;
+import java.security.cert.X509Certificate;
+import java.util.List;
+
+X509Certificate target = new CertificateAnalyzer()
+    .read(Paths.get("certificate.pem")).get(0);
+// storePassword comes from your secret source; clear it in your own finally block.
+List<CertificateMatch> matches = new KeyStoreCertificateFinder()
+    .find(Paths.get("application.jks"), "JKS", storePassword, target);
+System.out.println("Certificate found: " + !matches.isEmpty());
+for (CertificateMatch match : matches) {
+    System.out.println(match.getAlias());
+    System.out.println(match.getEntryType());
+    System.out.println(match.getCreationTime());
+    System.out.println(match.getChainIndex());
+    System.out.println(match.getCertificateReport());
+}
+```
+
+Lookup compares full DER bytes, not subject names, serial numbers or only public keys. It returns all occurrences sorted by alias then chain index, including intermediate/root positions in private key chains. An empty immutable list means absent. Each immutable match contains the alias, entry type, entry creation time (nullable and distinct from certificate issuance), zero-based chain index (`-1` for a standalone trusted certificate), and the existing detailed certificate report. No private key is recovered and no entry password is needed. Secret-key entries are skipped. Presence is independent of expiry or chain trust: finding a certificate does not establish that it is trusted or usable. Loading errors propagate rather than being reported as absence. Caller password arrays remain unchanged; loading uses a cleared temporary copy.
+
+The shared `KeyStoreLoader` centralizes store loading for analysis and lookup. `KeyStoreCertificateFinder` handles searching and delegates public certificate inspection to `CertificateAnalyzer`. Tests include both formats, trusted/leaf/deeper-chain occurrences, duplicate aliases, same-subject nonmatches, absent/empty/secret-only stores, wrong passwords, invalid arguments, immutable results and preserved caller passwords. The deeper-chain fixture is intentionally synthetic: lookup does not validate trust.

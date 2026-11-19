@@ -115,4 +115,64 @@ class CertificateUtilityTest {
         assertFalse(new ChainAnalyzer().inspect(Arrays.asList(certificate,other),at).getFindings().isEmpty());
     }
     @Test void rejectsEmptyChain() { assertThrows(IllegalArgumentException.class,()->new ChainAnalyzer().inspect(Collections.emptyList(),at)); }
+
+    @Test void findsLeafInBothStoreFormatsWithoutEntryPassword() throws Exception {
+        for(String type:Arrays.asList("JKS","PKCS12")) {
+            Path file="JKS".equals(type)?jks:p12;
+            KeyStore store=KeyStore.getInstance(type);
+            try(InputStream in=Files.newInputStream(file)) { store.load(in,password()); }
+            X509Certificate target=(X509Certificate)store.getCertificate("server");
+            char[] callerPassword=password();
+            List<CertificateMatch> matches=new KeyStoreCertificateFinder(analyzer(at)).find(file,type,callerPassword,target);
+            assertEquals(1,matches.size());
+            CertificateMatch match=matches.get(0);
+            assertEquals("server",match.getAlias()); assertEquals("PRIVATE_KEY",match.getEntryType());
+            assertEquals(0,match.getChainIndex()); assertNotNull(match.getCreationTime());
+            assertEquals(analyzer(at).analyze(target).getDetails(),match.getCertificateReport().getDetails());
+            assertArrayEquals(password(),callerPassword);
+            assertThrows(UnsupportedOperationException.class,()->matches.clear());
+        }
+    }
+    @Test void findsAllAliasesAndDeeperChainPositions() throws Exception {
+        KeyStore source=KeyStore.getInstance("PKCS12");
+        try(InputStream in=Files.newInputStream(p12)) { source.load(in,password()); }
+        X509Certificate leaf=(X509Certificate)source.getCertificate("server");
+        KeyStore store=KeyStore.getInstance("JKS"); store.load(null,password());
+        store.setCertificateEntry("a-trusted",certificate);
+        store.setCertificateEntry("b-trusted",certificate);
+        // Deliberately synthetic chain: lookup must inspect positions regardless of chain trust.
+        store.setKeyEntry("c-key",source.getKey("server",password()),"different-entry-password".toCharArray(),
+            new java.security.cert.Certificate[]{leaf,certificate});
+        Path file=directory.resolve("search-duplicates.jks");
+        try(OutputStream out=Files.newOutputStream(file)) { store.store(out,password()); }
+        List<CertificateMatch> matches=new KeyStoreCertificateFinder().find(file,"JKS",password(),certificate);
+        assertEquals(3,matches.size());
+        assertEquals("a-trusted",matches.get(0).getAlias()); assertEquals("b-trusted",matches.get(1).getAlias());
+        assertEquals("TRUSTED_CERTIFICATE",matches.get(0).getEntryType()); assertEquals(-1,matches.get(0).getChainIndex());
+        assertEquals("c-key",matches.get(2).getAlias()); assertEquals(1,matches.get(2).getChainIndex());
+    }
+    @Test void sameSubjectDoesNotMeanExactCertificateMatch() throws Exception {
+        KeyStore other=KeyStore.getInstance("PKCS12");
+        try(InputStream in=Files.newInputStream(p12)) { other.load(in,password()); }
+        X509Certificate target=(X509Certificate)other.getCertificate("server");
+        assertEquals(certificate.getSubjectX500Principal(),target.getSubjectX500Principal());
+        assertTrue(new KeyStoreCertificateFinder().find(jks,"JKS",password(),target).isEmpty());
+    }
+    @Test void emptyAndSecretOnlyStoresReturnNoMatches() throws Exception {
+        for(boolean secret:Arrays.asList(false,true)) {
+            KeyStore store=KeyStore.getInstance("PKCS12");store.load(null,password());
+            if(secret) store.setEntry("secret",new KeyStore.SecretKeyEntry(new javax.crypto.spec.SecretKeySpec(new byte[16],"AES")),new KeyStore.PasswordProtection(password()));
+            Path file=directory.resolve("search-"+secret+".p12");
+            try(OutputStream out=Files.newOutputStream(file)) { store.store(out,password()); }
+            assertTrue(new KeyStoreCertificateFinder().find(file,"PKCS12",password(),certificate).isEmpty());
+        }
+    }
+    @Test void searchRejectsWrongPasswordAndInvalidInputs() {
+        KeyStoreCertificateFinder finder=new KeyStoreCertificateFinder();
+        assertThrows(IOException.class,()->finder.find(jks,"JKS","wrong".toCharArray(),certificate));
+        assertThrows(NullPointerException.class,()->finder.find(jks,"JKS",null,certificate));
+        assertThrows(NullPointerException.class,()->finder.find(jks,"JKS",password(),null));
+        assertThrows(IllegalArgumentException.class,()->finder.find(jks,"INVALID",password(),certificate));
+        assertThrows(IOException.class,()->finder.find(directory.resolve("missing"),"JKS",password(),certificate));
+    }
 }

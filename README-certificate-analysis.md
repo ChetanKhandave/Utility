@@ -140,3 +140,43 @@ Comparison is alias based, ordered deterministically. Exact DER encodings determ
 For changed certificates, compare `certificate[n].publicKeySha256` in the old/new details to distinguish renewal using the same public key from public key replacement. Chain addition, removal, replacement and reordering are detected; a pure reordering also has a `chainOrder` difference. Identical certificates whose alias sets differ are listed as possible alias renames/copies; duplicate occurrences make that interpretation ambiguous. They remain ADDED/REMOVED under alias comparison. Store provider/type differences are not entry content changes, permitting comparisons across formats. Store password changes and different encrypted file bytes alone do not imply certificate changes.
 
 **Scope:** This compares public certificates/chains and entry metadata. It does not compare private/secret key material, encrypted blobs, store passwords, or file bytes. Even UNCHANGED private-key entries do not prove equal private keys; inspect `keyMaterialComparison=NOT_CHECKED`. Secret-key entries are never called UNCHANGED; metadata changes can still be reported. For optional per-store possession checks use the existing `KeyStoreAnalyzer` with entry password providers; that is separate from comparison. Changed does not imply invalid, and unchanged does not imply valid. PKIX/revocation/hostname validation is not performed by the comparator. Load/parse/password failures throw exceptions, never a misleading empty difference report. Custom output formats can implement the `ComparisonReportFormatter` strategy without changing comparison logic. Reports contain public certificate identity metadata and should be handled accordingly.
+
+## JSON and HTML comparison reports
+
+The existing TEXT command remains compatible. Explicit format selection follows the output path:
+
+```sh
+java -cp target/utility-1.0-SNAPSHOT.jar com.chetankhandave.utility.certificate.CertificateAnalysisCli compare JKS before.jks JKS after.jks comparison.json --format JSON
+java -cp target/utility-1.0-SNAPSHOT.jar com.chetankhandave.utility.certificate.CertificateAnalysisCli compare JKS before.jks JKS after.jks comparison.html --format HTML
+```
+
+Format names are case insensitive. TEXT is the default; extensions do not select the format. Both commands prompt for store passwords. Output files must not already exist. Reports are written as UTF-8. Open the HTML file directly in a browser: no server, internet connection, JavaScript, or external assets are required. Its summary, coloured status labels, side-by-side field changes, expandable before/after details and CSS-only **Hide unchanged entries** checkbox support manual review. The filter keeps NOT_COMPARABLE entries visible. Collapsed detail sections should be expanded before printing when full details are needed.
+
+Use a single comparison result to generate both formats in Java:
+
+```java
+KeyStoreComparison comparison = new KeyStoreComparator().compare(
+    Paths.get("before.jks"), "JKS", beforePassword,
+    Paths.get("after.jks"), "JKS", afterPassword);
+ComparisonReportWriter writer = new ComparisonReportWriter();
+writer.write(Paths.get("comparison.json"), comparison, new JsonComparisonReportFormatter());
+writer.write(Paths.get("comparison.html"), comparison, new HtmlComparisonReportFormatter());
+```
+
+Both formatters implement the existing `ComparisonReportFormatter` Strategy interface. The small `ComparisonReportFormat` factory selects a strategy for the CLI. Formatting does not reload stores or modify comparison data; `ComparisonReportWriter` handles encoding and file creation separately. Production code still has no external dependencies. Gson is test-only and independently parses JSON output in strict mode. Formatters have no mutable instance state and can be shared across threads with immutable comparison results.
+
+### JSON schema version 1.0
+
+- `schemaVersion`: string `1.0`.
+- `summary`: numeric counts keyed by the existing uppercase status names, including zero counts.
+- `scope`: `privateKeyMaterial=NOT_CHECKED`, `secretKeyMaterial=NOT_CHECKED`, `trustValidation=NOT_PERFORMED`.
+- `entries`: ordered array of objects containing `alias`, `status`, `differences`, `before`, and `after`.
+- Each difference has `field`, `before`, and `after`. Missing values are JSON null, not the string `"null"` or an empty string.
+- Each present snapshot contains `entry` (metadata report) and `certificates` (ordered reports with zero-based `chainIndex`). Reports contain a `details` object and a `findings` array. Absent snapshots are JSON null.
+- `certificateRelocations`: observations about identical certificates whose alias sets changed, not proof of a rename.
+
+Metadata values retain their existing string/null representation; only counts and chain indices are JSON numbers. Raw key bytes and passwords are never added. JSON preserves Unicode, quotes, backslashes and controls via standard escaping. It is a standalone data format, not a script fragment for embedding in a webpage. HTML escapes all report-derived text and uses fixed status names in CSS classes. Unsupported HTML control characters and unpaired surrogates are displayed as visible `\\uXXXX` escapes; valid supplementary characters are preserved.
+
+### Formatter verification
+
+The JUnit suite covers empty reports, all six statuses, missing snapshots and null versus empty values, chain indices and unequal chain lengths, complete findings/details, relocation observations, JSON parsing with an independent strict parser, quotes/backslashes/all ASCII controls, international text and supplementary characters, unpaired surrogates, HTML/script injection in every text category, HTML document parsing, offline policy and filter markup, large fields, null arguments, unknown formats, deterministic concurrent rendering, UTF-8 files, I/O failures, preservation of existing files and formatter failure before file creation. Existing certificate, lookup and comparison tests remain part of the suite. Tests cover the specified boundaries; they are not a claim that every possible input has been exhaustively tested.

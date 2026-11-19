@@ -102,3 +102,41 @@ for (CertificateMatch match : matches) {
 Lookup compares full DER bytes, not subject names, serial numbers or only public keys. It returns all occurrences sorted by alias then chain index, including intermediate/root positions in private key chains. An empty immutable list means absent. Each immutable match contains the alias, entry type, entry creation time (nullable and distinct from certificate issuance), zero-based chain index (`-1` for a standalone trusted certificate), and the existing detailed certificate report. No private key is recovered and no entry password is needed. Secret-key entries are skipped. Presence is independent of expiry or chain trust: finding a certificate does not establish that it is trusted or usable. Loading errors propagate rather than being reported as absence. Caller password arrays remain unchanged; loading uses a cleared temporary copy.
 
 The shared `KeyStoreLoader` centralizes store loading for analysis and lookup. `KeyStoreCertificateFinder` handles searching and delegates public certificate inspection to `CertificateAnalyzer`. Tests include both formats, trusted/leaf/deeper-chain occurrences, duplicate aliases, same-subject nonmatches, absent/empty/secret-only stores, wrong passwords, invalid arguments, immutable results and preserved caller passwords. The deeper-chain fixture is intentionally synthetic: lookup does not validate trust.
+
+## Compare two keystores
+
+```sh
+mvn clean test package
+java -cp target/utility-1.0-SNAPSHOT.jar com.chetankhandave.utility.certificate.CertificateAnalysisCli compare JKS before.jks JKS after.jks comparison.txt
+```
+
+The console prompts separately for both store passwords. The optional final argument writes a UTF-8 report using CREATE_NEW: an existing file is never overwritten. Omit it to print the report. Each store may use `JKS` or `PKCS12` independently. No entry password is requested.
+
+```java
+import com.chetankhandave.utility.certificate.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+
+// Obtain beforePassword/afterPassword as char[] from your secret source.
+KeyStoreComparison comparison = new KeyStoreComparator().compare(
+    Paths.get("before.jks"), "JKS", beforePassword,
+    Paths.get("after.jks"), "JKS", afterPassword);
+String report = new TextComparisonReportFormatter().format(comparison);
+Files.write(Paths.get("comparison.txt"), report.getBytes(StandardCharsets.UTF_8),
+    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+// Caller owns the two password arrays and clears them in a finally block.
+```
+
+Comparison is alias based, ordered deterministically. Exact DER encodings determine certificate identity; list order determines chain identity. Reports contain counts, old/new entry and certificate details, field differences, and independent certificate validation findings. A single captured time is used for both stores; analysis timestamps, remaining days and validity status do not create spurious certificate differences. Raw extension encodings are compared via certificate identity and included in field changes. Certificate expiry is a finding, not proof of a change or an indication of trust.
+
+| Status | Meaning |
+| --- | --- |
+| ADDED / REMOVED | Alias exists in only one store |
+| CHANGED | Entry type or certificate/chain contents differ |
+| METADATA_CHANGED | Public contents match, but entry creation time differs |
+| UNCHANGED | Public contents and compared entry metadata match; underlying keys remain unchecked |
+| NOT_COMPARABLE | Secret-key entry with matching metadata; secret material is deliberately not inspected |
+
+For changed certificates, compare `certificate[n].publicKeySha256` in the old/new details to distinguish renewal using the same public key from public key replacement. Chain addition, removal, replacement and reordering are detected; a pure reordering also has a `chainOrder` difference. Identical certificates whose alias sets differ are listed as possible alias renames/copies; duplicate occurrences make that interpretation ambiguous. They remain ADDED/REMOVED under alias comparison. Store provider/type differences are not entry content changes, permitting comparisons across formats. Store password changes and different encrypted file bytes alone do not imply certificate changes.
+
+**Scope:** This compares public certificates/chains and entry metadata. It does not compare private/secret key material, encrypted blobs, store passwords, or file bytes. Even UNCHANGED private-key entries do not prove equal private keys; inspect `keyMaterialComparison=NOT_CHECKED`. Secret-key entries are never called UNCHANGED; metadata changes can still be reported. For optional per-store possession checks use the existing `KeyStoreAnalyzer` with entry password providers; that is separate from comparison. Changed does not imply invalid, and unchanged does not imply valid. PKIX/revocation/hostname validation is not performed by the comparator. Load/parse/password failures throw exceptions, never a misleading empty difference report. Custom output formats can implement the `ComparisonReportFormatter` strategy without changing comparison logic. Reports contain public certificate identity metadata and should be handled accordingly.

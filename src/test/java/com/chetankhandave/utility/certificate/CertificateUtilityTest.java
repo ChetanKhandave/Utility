@@ -175,4 +175,127 @@ class CertificateUtilityTest {
         assertThrows(IllegalArgumentException.class,()->finder.find(jks,"INVALID",password(),certificate));
         assertThrows(IOException.class,()->finder.find(directory.resolve("missing"),"JKS",password(),certificate));
     }
+
+    private Path comparisonStore(String name, String type, String[] aliases, X509Certificate[] certs) throws Exception {
+        KeyStore store=KeyStore.getInstance(type); store.load(null,password());
+        for(int i=0;i<aliases.length;i++) store.setCertificateEntry(aliases[i],certs[i]);
+        Path file=directory.resolve(name);
+        try(OutputStream out=Files.newOutputStream(file)) { store.store(out,password()); }
+        return file;
+    }
+    private X509Certificate otherCertificate() throws Exception {
+        KeyStore store=KeyStore.getInstance("PKCS12");
+        try(InputStream in=Files.newInputStream(p12)) { store.load(in,password()); }
+        return (X509Certificate)store.getCertificate("server");
+    }
+    private KeyStoreComparison compareStores(Path old,Path current) throws Exception {
+        return new KeyStoreComparator(Clock.fixed(at,ZoneOffset.UTC)).compare(old,"JKS",password(),current,"JKS",password());
+    }
+    @Test void comparisonOfSameStoreIsUnchanged() throws Exception {
+        KeyStoreComparison report=compareStores(jks,jks);
+        assertEquals(KeyStoreComparison.Status.UNCHANGED,report.getEntries().get(0).getStatus());
+        assertTrue(report.getEntries().get(0).getDifferences().isEmpty());
+        assertEquals(Integer.valueOf(1),report.getCounts().get(KeyStoreComparison.Status.UNCHANGED));
+    }
+    @Test void comparisonFindsAddedAndRemovedAliases() throws Exception {
+        Path old=comparisonStore("removed.jks","JKS",new String[]{"old"},new X509Certificate[]{certificate});
+        Path current=comparisonStore("added.jks","JKS",new String[]{"new"},new X509Certificate[]{certificate});
+        KeyStoreComparison report=compareStores(old,current);
+        assertEquals("new",report.getEntries().get(0).getAlias());
+        assertEquals(KeyStoreComparison.Status.ADDED,report.getEntries().get(0).getStatus());
+        assertEquals(KeyStoreComparison.Status.REMOVED,report.getEntries().get(1).getStatus());
+        assertEquals(1,report.getCertificateRelocations().size());
+        assertTrue(report.getCertificateRelocations().get(0).contains("not proof of rename"));
+    }
+    @Test void comparisonDetectsReplacementAndPublicKeyChanges() throws Exception {
+        Path old=comparisonStore("replace-old.jks","JKS",new String[]{"cert"},new X509Certificate[]{certificate});
+        Path current=comparisonStore("replace-new.jks","JKS",new String[]{"cert"},new X509Certificate[]{otherCertificate()});
+        KeyStoreComparison.Entry entry=compareStores(old,current).getEntries().get(0);
+        assertEquals(KeyStoreComparison.Status.CHANGED,entry.getStatus());
+        assertTrue(entry.getDifferences().stream().anyMatch(d->d.getField().equals("certificate[0].sha256Fingerprint")));
+        assertTrue(entry.getDifferences().stream().anyMatch(d->d.getField().equals("certificate[0].publicKeySha256")));
+        assertFalse(entry.getDifferences().stream().anyMatch(d->d.getField().endsWith("analyzedAt")));
+    }
+    @Test void comparisonDetectsEntryTypeChange() throws Exception {
+        Path trusted=comparisonStore("type.jks","JKS",new String[]{"server"},new X509Certificate[]{certificate});
+        KeyStoreComparison.Entry entry=compareStores(jks,trusted).getEntries().get(0);
+        assertEquals(KeyStoreComparison.Status.CHANGED,entry.getStatus());
+        assertTrue(entry.getDifferences().stream().anyMatch(d->d.getField().equals("entryType")));
+    }
+    private Path chainStore(String name,java.security.cert.Certificate[] chain) throws Exception {
+        KeyStore store=KeyStore.getInstance("JKS");store.load(null,password());
+        // Synthetic chains deliberately test comparison independently from trust validation.
+        store.setKeyEntry("server",privateKey,password(),chain);
+        Path file=directory.resolve(name);
+        try(OutputStream out=Files.newOutputStream(file)) { store.store(out,password()); }
+        return file;
+    }
+    @Test void comparisonDetectsChainExtensionAndRemoval() throws Exception {
+        Path extended=chainStore("extended.jks",new java.security.cert.Certificate[]{certificate,otherCertificate()});
+        KeyStoreComparison.Entry entry=compareStores(jks,extended).getEntries().get(0);
+        assertEquals(KeyStoreComparison.Status.CHANGED,entry.getStatus());
+        assertTrue(entry.getDifferences().stream().anyMatch(d->d.getField().equals("chainLength") && "2".equals(d.getAfter())));
+        assertTrue(compareStores(extended,jks).getEntries().get(0).getDifferences().stream().anyMatch(d->d.getField().equals("chainLength") && "1".equals(d.getAfter())));
+    }
+    @Test void comparisonDetectsChainReordering() throws Exception {
+        X509Certificate other=otherCertificate();
+        Path first=chainStore("order-a.jks",new java.security.cert.Certificate[]{certificate,other});
+        Path second=chainStore("order-b.jks",new java.security.cert.Certificate[]{other,certificate});
+        assertTrue(compareStores(first,second).getEntries().get(0).getDifferences().stream().anyMatch(d->d.getField().equals("chainOrder")));
+    }
+    @Test void comparisonSupportsDifferentFormatsAndPasswords() throws Exception {
+        Path second=comparisonStore("cross-format.p12","PKCS12",new String[]{"server"},new X509Certificate[]{certificate});
+        KeyStore store=KeyStore.getInstance("PKCS12");try(InputStream in=Files.newInputStream(second)) { store.load(in,password()); }
+        char[] secondPassword="second-store-password".toCharArray();
+        try(OutputStream out=Files.newOutputStream(second)) { store.store(out,secondPassword); }
+        char[] firstPassword=password();
+        KeyStoreComparison comparison=new KeyStoreComparator().compare(jks,"JKS",firstPassword,second,"PKCS12",secondPassword);
+        assertEquals(1,comparison.getEntries().size());
+        assertArrayEquals(password(),firstPassword); assertArrayEquals("second-store-password".toCharArray(),secondPassword);
+    }
+    @Test void comparisonNeverClaimsSecretKeysAreEqual() throws Exception {
+        KeyStore store=KeyStore.getInstance("PKCS12");store.load(null,password());
+        store.setEntry("secret",new KeyStore.SecretKeyEntry(new javax.crypto.spec.SecretKeySpec(new byte[16],"AES")),new KeyStore.PasswordProtection(password()));
+        Path file=directory.resolve("compare-secret.p12");try(OutputStream out=Files.newOutputStream(file)) { store.store(out,password()); }
+        KeyStoreComparison comparison=new KeyStoreComparator().compare(file,"PKCS12",password(),file,"PKCS12",password());
+        assertEquals(KeyStoreComparison.Status.NOT_COMPARABLE,comparison.getEntries().get(0).getStatus());
+        assertEquals("NOT_CHECKED",comparison.getEntries().get(0).getBefore().get(0).getDetails().get("keyMaterialComparison"));
+    }
+    @Test void comparisonResultsAreImmutable() throws Exception {
+        KeyStoreComparison report=compareStores(jks,jks);
+        assertThrows(UnsupportedOperationException.class,()->report.getEntries().clear());
+        assertThrows(UnsupportedOperationException.class,()->report.getCounts().clear());
+        assertThrows(UnsupportedOperationException.class,()->report.getCertificateRelocations().clear());
+        assertThrows(UnsupportedOperationException.class,()->report.getEntries().get(0).getBefore().clear());
+        assertThrows(UnsupportedOperationException.class,()->report.getEntries().get(0).getDifferences().clear());
+    }
+    @Test void comparisonWrongPasswordFailsRatherThanSayingRemoved() {
+        assertThrows(IOException.class,()->new KeyStoreComparator().compare(jks,"JKS",password(),p12,"PKCS12","wrong".toCharArray()));
+    }
+    @Test void comparisonReportIncludesSummaryDetailsAndScope() throws Exception {
+        String report=new TextComparisonReportFormatter().format(compareStores(jks,jks));
+        assertTrue(report.contains("UNCHANGED: 1")); assertTrue(report.contains("[UNCHANGED] server"));
+        assertTrue(report.contains("sha256Fingerprint")); assertTrue(report.contains("NOT_CHECKED"));
+        assertFalse(report.contains("test-only-password"));
+    }
+    @Test void emptyStoresHaveZeroCounts() throws Exception {
+        Path empty=comparisonStore("compare-empty.jks","JKS",new String[0],new X509Certificate[0]);
+        KeyStoreComparison report=compareStores(empty,empty);
+        assertTrue(report.getEntries().isEmpty());
+        assertTrue(report.getCounts().values().stream().allMatch(count->count==0));
+    }
+
+    @Test void certificateRenewalCanKeepTheSamePublicKey() throws Exception {
+        Path renewed=directory.resolve("renewed.jks"); Files.copy(jks,renewed);
+        String executable=Paths.get(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows")?"keytool.exe":"keytool").toString();
+        Process process=new ProcessBuilder(executable,"-selfcert","-alias","server","-validity","730","-keystore",renewed.toString(),
+            "-storetype","JKS","-storepass","test-only-password","-keypass","test-only-password")
+            .redirectErrorStream(true).redirectOutput(directory.resolve("renewal.log").toFile()).start();
+        assertEquals(0,process.waitFor());
+        KeyStoreComparison.Entry entry=compareStores(jks,renewed).getEntries().get(0);
+        assertEquals(KeyStoreComparison.Status.CHANGED,entry.getStatus());
+        assertTrue(entry.getDifferences().stream().anyMatch(d->d.getField().equals("certificate[0].notAfter")));
+        assertEquals(entry.getBefore().get(1).getDetails().get("publicKeySha256"),entry.getAfter().get(1).getDetails().get("publicKeySha256"));
+        assertFalse(entry.getDifferences().stream().anyMatch(d->d.getField().equals("certificate[0].publicKeySha256")));
+    }
 }

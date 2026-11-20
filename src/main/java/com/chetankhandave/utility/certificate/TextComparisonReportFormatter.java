@@ -30,7 +30,7 @@ public final class TextComparisonReportFormatter implements ComparisonReportForm
             for(String finding:reports.get(i).getFindings()) out.append("    Finding: ").append(safe(finding)).append('\n');
         }
     }
-    private static String safe(String value) {
+    static String safe(String value) {
         if(value==null) return "<absent>";
         StringBuilder escaped=new StringBuilder();
         for(char c:value.toCharArray()) {

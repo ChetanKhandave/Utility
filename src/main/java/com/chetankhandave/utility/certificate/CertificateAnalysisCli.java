@@ -9,7 +9,9 @@ import java.util.*;
 public final class CertificateAnalysisCli {
     private CertificateAnalysisCli() { }
     public static void main(String[] args) throws Exception {
-        if(args.length==2 && "certificate".equals(args[0])) {
+        if(args.length>0 && "validate".equals(args[0])) {
+            DeploymentValidationCli.main(args);
+        } else if(args.length==2 && "certificate".equals(args[0])) {
             CertificateAnalyzer analyzer=new CertificateAnalyzer();
             for(X509Certificate certificate:analyzer.read(Paths.get(args[1]))) System.out.println(analyzer.analyze(certificate));
         } else if((args.length==5 || args.length==6 || args.length==8) && "compare".equals(args[0])) {

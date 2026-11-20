@@ -49,8 +49,13 @@ public final class JsonComparisonReportFormatter implements ComparisonReportForm
         value.put("details",report.getDetails()); value.put("findings",report.getFindings()); return value;
     }
     // Only known maps/lists/strings/integer counts are serialized; arbitrary bean reflection is avoided.
+    /** Package-level encoder reused by the deployment report adapter. */
+    static String encodeValue(Object value) {
+        StringBuilder out=new StringBuilder(); append(out,value,0);return out.toString();
+    }
     private static void append(StringBuilder out,Object value,int depth) {
         if(value==null) out.append("null");
+        else if(value instanceof Boolean) out.append(value);
         else if(value instanceof Number) out.append(value);
         else if(value instanceof Map) {
             out.append('{'); boolean first=true;

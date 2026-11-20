@@ -64,7 +64,7 @@ public final class HtmlComparisonReportFormatter implements ComparisonReportForm
         out.append("</section>");
     }
     /** Data only enters HTML text nodes, never scripts, styles, URLs or attributes. */
-    private static String escape(String text) {
+    static String escape(String text) {
         if(text==null) return "(absent)";
         StringBuilder out=new StringBuilder();
         for(int i=0;i<text.length();i++) {

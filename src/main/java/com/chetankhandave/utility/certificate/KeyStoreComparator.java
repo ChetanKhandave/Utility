@@ -16,10 +16,14 @@ public final class KeyStoreComparator {
     public KeyStoreComparison compare(Path before, String beforeType, char[] beforePassword,
             Path after, String afterType, char[] afterPassword)
             throws IOException, GeneralSecurityException {
+        return compare(KeyStoreLoader.load(before,beforeType,beforePassword),KeyStoreLoader.load(after,afterType,afterPassword));
+    }
+    /** Reuse already loaded stores so deployment comparison and validation see the same certificates. */
+    KeyStoreComparison compare(KeyStore before,KeyStore after) throws GeneralSecurityException {
         // Capture one instant so validation findings have a consistent reference time.
         CertificateAnalyzer analyzer=new CertificateAnalyzer(Clock.fixed(clock.instant(),ZoneOffset.UTC),Collections.emptyList());
-        Map<String,Snapshot> oldEntries=snapshot(KeyStoreLoader.load(before,beforeType,beforePassword),analyzer);
-        Map<String,Snapshot> newEntries=snapshot(KeyStoreLoader.load(after,afterType,afterPassword),analyzer);
+        Map<String,Snapshot> oldEntries=snapshot(before,analyzer);
+        Map<String,Snapshot> newEntries=snapshot(after,analyzer);
         SortedSet<String> aliases=new TreeSet<>(oldEntries.keySet()); aliases.addAll(newEntries.keySet());
         List<KeyStoreComparison.Entry> entries=new ArrayList<>();
         for(String alias:aliases) {

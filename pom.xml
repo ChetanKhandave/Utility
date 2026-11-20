@@ -21,6 +21,9 @@
         <!-- Independent JSON parser validates generated reports in tests only. -->
         <dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId>
             <version>2.11.0</version><scope>test</scope></dependency>
+        <!-- Deterministic certificate fixtures only; production remains JCA-only. -->
+        <dependency><groupId>org.bouncycastle</groupId><artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.80</version><scope>test</scope></dependency>
     </dependencies>
     <build><plugins>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin>

@@ -180,3 +180,79 @@ Metadata values retain their existing string/null representation; only counts an
 ### Formatter verification
 
 The JUnit suite covers empty reports, all six statuses, missing snapshots and null versus empty values, chain indices and unequal chain lengths, complete findings/details, relocation observations, JSON parsing with an independent strict parser, quotes/backslashes/all ASCII controls, international text and supplementary characters, unpaired surrogates, HTML/script injection in every text category, HTML document parsing, offline policy and filter markup, large fields, null arguments, unknown formats, deterministic concurrent rendering, UTF-8 files, I/O failures, preservation of existing files and formatter failure before file creation. Existing certificate, lookup and comparison tests remain part of the suite. Tests cover the specified boundaries; they are not a claim that every possible input has been exhaustively tested.
+
+## Deployment validation: expected changes, renewal and truststore
+
+All three independent validators are now available together. Start with `examples/deployment-validation.properties` and edit the aliases and requirements for your application.
+
+```sh
+java -cp target/utility-1.0-SNAPSHOT.jar com.chetankhandave.utility.certificate.CertificateAnalysisCli validate JKS before.jks JKS after.jks PKCS12 truststore.p12 examples/deployment-validation.properties validation.html --format HTML
+```
+
+Use `--format JSON` or `--format TEXT` and a new output filename for other reports. Both stores and the truststore independently accept JKS/PKCS12. The command prompts for three store passwords; entry passwords are unnecessary. No keystore is modified. UTF-8 policy files are loaded through a Reader; unknown properties, malformed booleans, invalid statuses and contradictory change requirements are rejected before prompting. Reports use CREATE_NEW and cannot overwrite existing files. Exit code 0 means PASS, 2 means a completed report with FAIL/NOT_CHECKED/ERROR, and uncaught configuration/input/output failures produce the JVM's nonzero exit. All password arrays are cleared before an explicit exit.
+
+### Java API
+
+```java
+import com.chetankhandave.utility.certificate.*;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.util.Properties;
+
+Properties properties = new Properties();
+try (Reader reader = Files.newBufferedReader(
+        Paths.get("deployment-validation.properties"), StandardCharsets.UTF_8)) {
+    properties.load(reader);
+}
+DeploymentValidationPolicy policy = DeploymentValidationPolicy.fromProperties(properties);
+// Retrieve beforePassword, afterPassword and trustPassword as char[] from your secret source.
+// Caller owns and clears these arrays in a finally block.
+DeploymentValidationReport result = new DeploymentValidationService().validate(
+    Paths.get("before.jks"), "JKS", beforePassword,
+    Paths.get("after.jks"), "JKS", afterPassword,
+    Paths.get("truststore.p12"), "PKCS12", trustPassword, policy);
+String json = new DeploymentValidationReportFormatter().format(result, ComparisonReportFormat.JSON);
+String html = new DeploymentValidationReportFormatter().format(result, ComparisonReportFormat.HTML);
+System.out.println(result.getStatus());
+```
+
+Each keystore is loaded once for this workflow and all analysis uses one captured validation instant (inject a `Clock` for reproducibility). This provides a consistent in-memory snapshot after loading, not an atomic snapshot across separately changing files. Keep input files stable while they are loaded. A comparison or main-store load failure stops preparation with an exception; truststore loading is deferred to its validator so that its failure does not hide the other results.
+
+### Expected-change rules
+
+- Changes are **denied by default**. `allowChange.<alias>` accepts a comma-separated subset of `ADDED`, `REMOVED`, `CHANGED`, `METADATA_CHANGED` for an exact enumerated alias. For example `allowChange.old-ca=REMOVED` permits only that alias's removal.
+- `requireChange.<alias>` requires an actual observed status from the listed set; these statuses must also appear in the alias's allowlist. A permission alone does not force a change.
+- `requiredAliases` requires the aliases to exist in the new store. An approved removal does not satisfy this requirement.
+- CHANGED is the existing comparator's entry-content status, including entry-type and chain differences; it is not a fine-grained field allowlist. Use renewal requirements to constrain the target replacement certificate further.
+- Metadata-only changes require explicit permission. A same-alias secret entry reported NOT_COMPARABLE yields required NOT_CHECKED; this tool cannot prove secret material stayed unchanged. A private-key entry marked unchanged refers to public certificates/metadata only, never proof of unchanged private keys.
+
+### Renewal rules
+
+The target is the new store's `target.alias` certificate (leaf for a key entry). The old alias supplies the baseline. The new certificate must be valid at the captured instant and meet the inclusive minimum remaining duration; expiry must advance by default. Subject preservation, end-entity requirement, exact DNS SANs, explicit KU bits, explicit EKU OIDs and public-key rotation can be configured. `RenewalPolicy.builder()` also supports direct programmatic construction.
+
+DNS checks require explicit SAN values after IDN/case/trailing-dot normalization; they do not use CN fallback, wildcard expansion, or IP-address SAN matching. These are certificate-content requirements, not a complete TLS hostname-verification implementation. Required KU/EKU extensions must exist and explicitly contain the requested bits/OIDs; absent extensions and anyExtendedKeyUsage alone do not satisfy this conservative policy. Public key policy compares encoded public keys, not private keys. A missing new certificate fails. A missing old certificate produces required NOT_CHECKED when expiry/subject/key comparison needs it; for a first issuance, disable the baseline-dependent requirements explicitly. The old certificate need not still be valid to assess its renewal.
+
+### Truststore rules and revocation scope
+
+Only explicitly selected `trust.anchorAliases` **trusted-certificate entries** become anchors. A private-key alias, missing alias or wrong truststore password becomes a trust execution ERROR when run through the coordinator. Unselected certificates in the truststore/new store may supply intermediates but are not promoted to anchors. PKIX builds a path from an unordered local candidate collection, enforcing chain signatures, intermediate CA/key usage/path-length constraints, validity and provider algorithm constraints. Local policy additionally requires every selected anchor to be a valid CA at the captured instant with keyCertSign permitted if its KU extension is present. Invalid selected anchors fail even if another selected anchor can build a path.
+
+`trust.revocation=DISABLED` explicitly disables provider revocation checks and emits visible optional NOT_CHECKED; other successful checks may still yield PASS under that declared scope. `REQUIRED` emits **required NOT_CHECKED**, preventing PASS because OCSP/CRL verification is not implemented. No unchecked revocation is presented as successful. This is not a full TLS handshake, hostname check or universal statement of certificate trust. Runtime PKIX provider settings may affect path building, including AIA issuer fetching if the runtime has enabled it; the utility does not alter global security settings or provide an HTTP fetcher. For offline operation use local chains and a provider/runtime configuration with remote fetching disabled.
+
+The implementation uses the standard JCA [PKIXBuilderParameters](https://docs.oracle.com/javase/8/docs/api/java/security/cert/PKIXBuilderParameters.html) and [PKIXParameters](https://docs.oracle.com/javase/8/docs/api/java/security/cert/PKIXParameters.html) APIs; revocation behaviour is explicitly configured rather than relying on provider defaults.
+
+### Results and combined reports
+
+`ValidationCheck` is the Strategy interface; the coordinator runs independent checks and catches their execution exceptions without serializing exception messages that could expose secrets. Policies/results are immutable defensive copies, renewal uses a Builder, and the service is a facade over the comparison and validator components. Custom checks can join the coordinator without changing existing validators.
+
+- Rule results contain stable rule IDs, status, message and `required`.
+- ERROR takes precedence over FAIL, then required NOT_CHECKED, then PASS. Optional unchecked rules remain visible but do not block an otherwise successful check. An empty/all-unchecked result never passes.
+- Overall status aggregates every validator. One failed requirement or required unchecked validator prevents overall PASS.
+- Combined JSON is a versioned envelope with `schemaVersion`, the existing `comparison` document, and `validation` containing `status` and `checks`. The required flag is a JSON boolean. Existing comparison-only JSON schema remains unchanged.
+- Combined HTML retains the comparison and appends separately labelled rule outcomes. All validation-derived text is escaped. Text reports also escape control characters.
+
+### Validation tests and platform limits
+
+Every new test and fixture helper has Javadoc describing its scenario. Tests include all approved change categories, denied aliases/statuses, mandatory-change absence, removed required aliases, immutable policy inputs, renewal validity endpoints/minimum-duration boundary, exact DNS/IDN handling, absent KU/EKU, key rotation/retention, missing baseline, real signed root/intermediate/leaf PKIX path building, missing issuers, unapproved anchors, invalid signatures, expired/future certificates, CA/key-usage/path-length constraints, explicit anchor selection, required revocation, independent failures, both store formats, password preservation, aggregation precedence, concurrent renewal checks, combined report escaping and CLI argument rejection. Existing tests remain included. Test cases cover these identified boundaries, not every possible certificate/provider combination.
+
+Bouncy Castle is a **test-only** dependency used to generate deterministic signed certificate fixtures; production still uses only JCA APIs. Validation was compiled for Java 8 source compatibility and executed on Java 21, not on an actual Java 8 runtime. Algorithm/provider support can differ across installed JDK versions; run `mvn clean test` on the intended JDK before deployment.
